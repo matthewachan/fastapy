@@ -28,11 +28,11 @@ def setup_rls():
     # Define problem parameters
     M = 200  # number of measurements
     N = 1000  # dimension of sparse signal
-    K = 10    # signal sparsity
-    mu = .02  # regularization parameter
+    K = 10  # signal sparsity
+    mu = 0.02  # regularization parameter
     sigma = 0.01  # The noise level in 'b'
 
-    print('Testing sparse least-squares with N={:}, M={:}'.format(N, M))
+    print("Testing sparse least-squares with N={:}, M={:}".format(N, M))
 
     # Create sparse signal
     x = np.zeros((N, 1))
@@ -41,7 +41,9 @@ def setup_rls():
 
     # define random Gaussian matrix
     A = np.random.randn(M, N)
-    A = A/linalg.norm(A, 2)  # Normalize the matrix so that our value of 'mu' is fairly invariant to N
+    A = A / linalg.norm(
+        A, 2
+    )  # Normalize the matrix so that our value of 'mu' is fairly invariant to N
 
     # Define observation vector
     b = np.dot(A, x)
@@ -51,13 +53,17 @@ def setup_rls():
     x0 = np.zeros((N, 1))
 
     # Create function handles
-    def f(x): return 0.5 * linalg.norm(np.dot(A, x) - b, 2)**2  # .5||Ax-b||^2
+    def f(x):
+        return 0.5 * linalg.norm(np.dot(A, x) - b, 2) ** 2  # .5||Ax-b||^2
 
-    def gradf(x): return np.dot(A.T, np.dot(A, x) - b)  # gradient of f(x)
+    def gradf(x):
+        return np.dot(A.T, np.dot(A, x) - b)  # gradient of f(x)
 
-    def g(x): return mu * np.abs(x).sum()  # mu*|x|
+    def g(x):
+        return mu * np.abs(x).sum()  # mu*|x|
 
-    def proxg(x, t): return shrink(x, mu*t)  # proximal operator for g(x)
+    def proxg(x, t):
+        return shrink(x, mu * t)  # proximal operator for g(x)
 
     return f, gradf, g, proxg, x0, x
 
@@ -72,12 +78,12 @@ def test_rls(debugging=False):
     assert lsq.residuals[-1] / lsq.residuals[0] < 1e-4
 
     if debugging:
-        plt.figure('sparse least-square')
+        plt.figure("sparse least-square")
         plt.subplot(2, 1, 1)
-        plt.stem(x,  markerfmt='go', linefmt='g:', label='Ground truth')
-        plt.stem(lsq.coefs_, markerfmt='bo', label='Fasta solution')
-        plt.xlabel('Index')
-        plt.ylabel('Signal Value')
+        plt.stem(x, markerfmt="go", linefmt="g:", label="Ground truth")
+        plt.stem(lsq.coefs_, markerfmt="bo", label="Fasta solution")
+        plt.xlabel("Index")
+        plt.ylabel("Signal Value")
 
         plt.subplot(2, 1, 2)
         plt.semilogy(lsq.residuals)
@@ -90,19 +96,21 @@ def test_fix_stepsize(debugging=False):
     # Set up Fasta solver
     lsq = Fasta(f, g, gradf, proxg)
     # custom stepsize
-    def fixed_step(*args): return 2
+    def fixed_step(*args):
+        return 2
+
     # Call Solver
     lsq.learn(x0, verbose=True, linesearch=False, next_stepsize=fixed_step)
 
     assert lsq.residuals[-1] / lsq.residuals[0] < 1e-4
 
     if debugging:
-        plt.figure('sparse least-square')
+        plt.figure("sparse least-square")
         plt.subplot(2, 1, 1)
-        plt.stem(x,  markerfmt='go', linefmt='g:', label='Ground truth')
-        plt.stem(lsq.coefs_, markerfmt='bo', label='Fasta solution')
-        plt.xlabel('Index')
-        plt.ylabel('Signal Value')
+        plt.stem(x, markerfmt="go", linefmt="g:", label="Ground truth")
+        plt.stem(lsq.coefs_, markerfmt="bo", label="Fasta solution")
+        plt.xlabel("Index")
+        plt.ylabel("Signal Value")
 
         plt.subplot(2, 1, 2)
         plt.semilogy(lsq.residuals)

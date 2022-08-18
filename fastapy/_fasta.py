@@ -5,6 +5,7 @@ import numpy as np
 from math import sqrt
 from scipy import linalg
 import time
+import torch
 
 import logging
 
@@ -168,6 +169,7 @@ class Fasta:
     Call solver
     >>> lsq.learn(x0, verbose=True)
     """
+
     def __init__(self, f, g, gradf, proxg, beta=0.5, n_iter=1000):
         self.f = f
         self.g = g
@@ -182,7 +184,14 @@ class Fasta:
     def __str__(self):
         return "Fast adaptive shrinkage/thresholding Algorithm instance"
 
-    def learn(self, coefs_init, tol=1e-4, verbose=True, linesearch=True, next_stepsize=_next_stepsize):
+    def learn(
+        self,
+        coefs_init,
+        tol=1e-4,
+        verbose=True,
+        linesearch=True,
+        next_stepsize=_next_stepsize,
+    ):
         r"""fits the model using FASTA algorithm
 
         parameters
@@ -205,11 +214,17 @@ class Fasta:
         self
         """
         logger = logging.getLogger("FASTA")
-        coefs_current = np.copy(coefs_init)
+        logger.setLevel(logging.DEBUG)
+        console = logging.StreamHandler()
+        logger.addHandler(console)
+
+        coefs_current = coefs_init.clone()
         grad_current = self.grad(coefs_current)
-        coefs_next = coefs_current + 0.01 * np.random.randn(coefs_current.shape[0], coefs_current.shape[1])
+        coefs_next = coefs_current + 0.01 * torch.normal(0, 1, coefs_current.size())
         grad_next = self.grad(coefs_next)
-        tau_current = next_stepsize(coefs_next - coefs_current, grad_next - grad_current, 0)
+        tau_current = next_stepsize(
+            coefs_next - coefs_current, grad_next - grad_current, 0
+        )
 
         self._funcValues.append(self.f(coefs_current))
         if verbose:
@@ -220,11 +235,21 @@ class Fasta:
             self.backtracks = []
 
         start = time.time()
-        logger.debug(f"Iteration \t objective value \t step-size \t backtracking steps taken \t residual")
+        logger.debug(
+            f"Iteration \t objective value \t step-size \t backtracking steps taken \t residual"
+        )
         for i in range(self.n_iter):
-            coefs_next, objective_next, sub_grad, tau, n_backtracks \
-                = _update_coefs(coefs_current, tau_current, grad_current,
-                                self.prox, self.f, self.g, self.beta, max(self._funcValues), linesearch)
+            coefs_next, objective_next, sub_grad, tau, n_backtracks = _update_coefs(
+                coefs_current,
+                tau_current,
+                grad_current,
+                self.prox,
+                self.f,
+                self.g,
+                self.beta,
+                max(self._funcValues),
+                linesearch,
+            )
 
             self._funcValues.append(objective_next)
 
@@ -245,15 +270,20 @@ class Fasta:
                 self.backtracks.append(n_backtracks)
                 self.objective.append(objective_next + self.g(coefs_next))
                 logger.debug(
-                    f"{i} \t {self.objective[i]} \t {self.stepsizes[i]} \t {self.backtracks[i]} \t {self.residuals[i]}")
+                    f"{i} \t {self.objective[i]} \t {self.stepsizes[i]} \t {self.backtracks[i]} \t {self.residuals[i]}"
+                )
 
             # Prepare for next iteration
             coefs_current = coefs_next
             grad_current = grad_next
 
-            if tau_next == 0.0 or min(residual_n, residual_r) < tol:  # convergence reached
+            if (
+                tau_next == 0.0 or min(residual_n, residual_r) < tol
+            ):  # convergence reached
                 break
-            elif tau_next < 0.0:  # non-convex probelms ->  negative stepsize -> use the previous value
+            elif (
+                tau_next < 0.0
+            ):  # non-convex probelms ->  negative stepsize -> use the previous value
                 tau_current = tau
             else:
                 tau_current = tau_next
