@@ -23,11 +23,11 @@ import torchvision
 import glob
 from PIL import Image
 
-KERNEL_SIZE = 21
-N_DEPTHS = 3
-SIGMA_NOISE = 5.0 / 255
-SIGMA_NLL = 0.1
-TAU = 0.1
+KERNEL_SIZE = 21  # approximate resolution of the PSF images
+N_DEPTHS = 3  # number of point sources to include in the image (each has its own depth)
+SIGMA_NOISE = 5.0 / 255  # standard deviation of the noise n
+SIGMA_NLL = 0.1  # standard deviation used to computed the negative log likelihood
+TAU = 0.1  # event camera thresholding value
 
 
 def shrink(x, mu):
@@ -48,7 +48,7 @@ def to_event(rgb, TAU):
 
 
 def load_psf(debugging=False):
-    """Loads DHPSF"""
+    """Loads DH-PSF calibrated images at different depths"""
 
     def normalize(img):
         return img / torch.sum(img)
@@ -67,11 +67,11 @@ def load_psf(debugging=False):
         psf = iopen(file).unsqueeze(0).unsqueeze(1)
         A = torch.cat([A, psf])
 
-    # """ TODO(mchan): Remove this"""
+    # """ TODO(mchan): This line takes a subset of the DH-PSF images such that the loaded PSFs are noticeably different from one another (i.e. one DH-PSF is at ~0º orientation, another is at ~90º orientation). This makes it easier for FASTA to discern different depths, but may not reflect the true PSF wrt depth."""
     A = A[::8]
 
     if debugging:
-        plt.title("Double helix PSFs")
+        plt.title("Double helix PSFs used (A)")
         plt.imshow(torchvision.utils.make_grid(A, normalize=True).permute(1, 2, 0))
         plt.show()
 
@@ -86,19 +86,23 @@ def get_x(debugging=False):
     xx = -xx
 
     def gauss(mean_x, mean_y, stdev):
+        """Generates a Gaussian blur kernel (which is used to simulate a point source)."""
         return torch.exp(
-            (-((xx - mean_x) ** 2) - (yy - mean_y) ** 2) / (2 * stdev ** 2)
+            (-((xx - mean_x) ** 2) - (yy - mean_y) ** 2) / (2 * stdev**2)
         )
 
     pts = torch.linspace(-100, 100, N_DEPTHS + 1)[:-1]
 
     offset = torch.div(pts[1] - pts[0], 2, rounding_mode="floor")
+    # x* is the ground truth scene that we'd like to recover in this inverse problem.
     x_star = torch.zeros_like(xx).unsqueeze(0).repeat([N_DEPTHS, 1, 1])
     for i, pt in enumerate(pts):
         x_star[i] = gauss(pt + offset, pt + offset, stdev)
 
     if debugging:
-        plt.title("Original scene (x)")
+        plt.title(
+            "Original scene (x).\n(Note: Each point source is at a different depth.\nBottom left is closest, top right is farthest.)"
+        )
         plt.imshow(torch.sum(x_star, axis=0))
         plt.show()
 
@@ -106,6 +110,7 @@ def get_x(debugging=False):
 
 
 def get_y(A, x_star, debugging=False):
+    """Simulates an event camera measurement, given a scene x and a PSF A. The observation is Q(Ax+n) where Q is the event camera thresholding oeprator and n is noise."""
     Ax_star = torch.zeros_like(x_star)
     for i in torch.arange(N_DEPTHS):
         Ax_star[i] += F.conv2d(
@@ -242,17 +247,17 @@ def invert(x_star, A, y, debugging=False):
     return best_x
 
 
-def setup_rls():
+def setup_rls(debugging=False):
     mu = 10  # regularization parameter
 
     # Create sparse signal
-    x = get_x()
+    x = get_x(debugging)
 
     # define random Gaussian matrix
-    A = load_psf()
+    A = load_psf(debugging)
 
     # Define observation vector
-    b = get_y(A, x)
+    b = get_y(A, x, debugging)
 
     #  The initial iterate:  a guess at the solution
     x0 = torch.zeros_like(x)
@@ -279,7 +284,7 @@ def setup_rls():
 
 
 def test_rls(debugging=False):
-    f, gradf, g, proxg, x0, x = setup_rls()
+    f, gradf, g, proxg, x0, x = setup_rls(debugging)
     # Set up Fasta solver
     lsq = Fasta(f, g, gradf, proxg)
     # Call Solver
@@ -288,18 +293,18 @@ def test_rls(debugging=False):
     if debugging:
         print(lsq.residuals[0], lsq.residuals[-1], np.amin(lsq.residuals))
         print(lsq.residuals[-1] / lsq.residuals[0])
-        plt.title("Recovered signal (z=0)")
-        plt.imshow(lsq.coefs_[0])
+        x_hat = torch.sum(lsq.coefs_, dim=0)
+        plt.title("Recovered scene x_hat (FASTA)")
+        plt.imshow(x_hat)
         plt.show()
-        plt.title("Recovered signal (z=1)")
-        plt.imshow(lsq.coefs_[1])
+        plt.title("Residual ||x*-x_hat||")
+        # print(x_hat.size(), x.size())
+        plt.imshow(torch.sqrt((torch.sum(lsq.coefs_, dim=0) - x[1]) ** 2))
         plt.show()
-        plt.title("Recovered signal (z=2)")
-        plt.imshow(lsq.coefs_[2])
-        plt.show()
-        plt.title("Recovered signal (FASTA)")
-        plt.imshow(torch.sum(lsq.coefs_, dim=0))
-        plt.show()
+        for i in range(len(lsq.coefs_)):
+            plt.title(f"Recovered scene at depth z={i}")
+            plt.imshow(lsq.coefs_[i])
+            plt.show()
     # assert lsq.residuals[-1] / lsq.residuals[0] < 1e-4
 
     # if debugging:
